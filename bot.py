@@ -54,7 +54,6 @@ async def on_message(message):
         return
 
     if not res:
-        await message.channel.send('Invalid format! See !help')
         return
 
     command = res.group(1)
