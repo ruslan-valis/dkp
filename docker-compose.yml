@@ -1,0 +1,11 @@
+version: '3'
+
+services:
+  bot:
+    build: .
+    env_file:
+      - $ENV
+    volumes:
+      - .:/app
+    command: >
+      bash -c "cd /app && python bot.py"
