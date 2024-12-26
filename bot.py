@@ -1,67 +1,203 @@
 import discord
-import os
+from discord.ext import commands
+from discord import app_commands
 import logging
-import re
+import os
+import json
+from datetime import datetime
 
-GUILD_ID = int(os.environ.get('GUILD_ID'))
-DISCORD_TOKEN = os.environ.get('DISCORD_TOKEN')
-LOG_LEVEL = os.environ.get('LOG_LEVEL', 'ERROR')
+# Load environment variables
+try:
+    GUILD_ID = int(os.getenv("GUILD_ID"))
+except (TypeError, ValueError):
+    raise ValueError("GUILD_ID environment variable is not set or invalid. Please check the .env file.")
 
-intents = discord.Intents.all()
-intents.members = True
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
-client = discord.Client(intents=intents)
-
+# Configure logging
 logging.basicConfig(level=LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
+# Initialize bot and intents
+intents = discord.Intents.default()
+bot = commands.Bot(command_prefix="!", intents=intents)
+dkp_data_file = "dkp_data.json"
+leaderboard_data_file = "leaderboard_data.json"
 
-async def operation(command, ammount, user_id):
-    logger.info('operation started')
-    for guild in client.guilds:
-        if guild.id == GUILD_ID:
-            logger.info('guild found')
-            for member in guild.members:
-                if member.id == user_id:
-                    logger.info('user found')
+# Ensure DKP and leaderboard data files exist
+def ensure_data_files():
+    for file in [dkp_data_file, leaderboard_data_file]:
+        if not os.path.exists(file):
+            with open(file, "w") as f:
+                json.dump({}, f)
 
-                    res = re.search('^(.*)\[(.*)\]$', member.nick)
-                    nick = res.group(1) if res else member.nick
-                    value = int(res.group(2)) if res else 0
+ensure_data_files()
 
-                    if command == 'minus':
-                        ammount = ammount * -1
+# Load and save data
+def load_data(file):
+    with open(file, "r") as f:
+        return json.load(f)
 
-                    diff = value + ammount
+def save_data(file, data):
+    with open(file, "w") as f:
+        json.dump(data, f, indent=4)
 
-                    await member.edit(nick=f'{nick}[{diff}]')
+# DKP management cog
+class DKPManager(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
 
+        # Bind commands to the specific guild
+        self.bot.tree.add_command(self.dkp_add, guild=discord.Object(id=GUILD_ID))
+        self.bot.tree.add_command(self.dkp_remove, guild=discord.Object(id=GUILD_ID))
+        self.bot.tree.add_command(self.dkp_show, guild=discord.Object(id=GUILD_ID))
+        self.bot.tree.add_command(self.dkp_leaderboard, guild=discord.Object(id=GUILD_ID))
 
-@client.event
+    @app_commands.command(name="dkp_add", description="Add DKP to a guild member.")
+    @app_commands.describe(
+        member="The member to add DKP to.",
+        amount="The amount of DKP to add."
+    )
+    async def dkp_add(self, interaction: discord.Interaction, member: discord.Member, amount: int):
+        if interaction.guild.id != GUILD_ID:
+            await interaction.response.send_message("This command is not available in this guild.", ephemeral=True)
+            return
+
+        if not interaction.user.guild_permissions.manage_guild:
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+            return
+
+        if amount < 0:
+            await interaction.response.send_message("Amount must be a non-negative integer.", ephemeral=True)
+            return
+
+        # Load current DKP and leaderboard data
+        dkp_data = load_data(dkp_data_file)
+        leaderboard_data = load_data(leaderboard_data_file)
+
+        member_id = str(member.id)
+        if member_id not in dkp_data:
+            dkp_data[member_id] = 0
+
+        dkp_data[member_id] += amount
+        save_data(dkp_data_file, dkp_data)
+
+        # Update monthly leaderboard
+        current_month = datetime.now().strftime("%Y-%m")
+        if member_id not in leaderboard_data:
+            leaderboard_data[member_id] = {}
+        if current_month not in leaderboard_data[member_id]:
+            leaderboard_data[member_id][current_month] = 0
+
+        leaderboard_data[member_id][current_month] += amount
+        save_data(leaderboard_data_file, leaderboard_data)
+
+        logger.info(f"{interaction.user.name} added {amount} DKP for {member.name}. New DKP: {dkp_data[member_id]}")
+
+        await interaction.response.send_message(f"Added {amount} DKP to {member.mention}. Current DKP: {dkp_data[member_id]}")
+
+    @app_commands.command(name="dkp_remove", description="Remove DKP from a guild member.")
+    @app_commands.describe(
+        member="The member to remove DKP from.",
+        amount="The amount of DKP to remove."
+    )
+    async def dkp_remove(self, interaction: discord.Interaction, member: discord.Member, amount: int):
+        if interaction.guild.id != GUILD_ID:
+            await interaction.response.send_message("This command is not available in this guild.", ephemeral=True)
+            return
+
+        if not interaction.user.guild_permissions.manage_guild:
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+            return
+
+        if amount < 0:
+            await interaction.response.send_message("Amount must be a non-negative integer.", ephemeral=True)
+            return
+
+        # Load current DKP data
+        dkp_data = load_data(dkp_data_file)
+
+        member_id = str(member.id)
+        if member_id not in dkp_data:
+            dkp_data[member_id] = 0
+
+        dkp_data[member_id] = max(0, dkp_data[member_id] - amount)
+        save_data(dkp_data_file, dkp_data)
+        logger.info(f"{interaction.user.name} removed {amount} DKP from {member.name}. New DKP: {dkp_data[member_id]}")
+
+        await interaction.response.send_message(f"Removed {amount} DKP from {member.mention}. Current DKP: {dkp_data[member_id]}")
+
+    @app_commands.command(name="dkp_show", description="Show the current DKP of a guild member.")
+    @app_commands.describe(
+        member="The member whose DKP to view (optional)."
+    )
+    async def dkp_show(self, interaction: discord.Interaction, member: discord.Member = None):
+        if interaction.guild.id != GUILD_ID:
+            await interaction.response.send_message("This command is not available in this guild.", ephemeral=True)
+            return
+
+        # Load current DKP data
+        dkp_data = load_data(dkp_data_file)
+
+        member_id = str(interaction.user.id if member is None else member.id)
+        current_dkp = dkp_data.get(member_id, 0)
+        target = "your" if member is None else f"{member.mention}'s"
+
+        await interaction.response.send_message(f"{interaction.user.mention}, {target} current DKP is: {current_dkp}")
+
+    @app_commands.command(name="dkp_leaderboard", description="Show the DKP leaderboard.")
+    @app_commands.describe(
+        time_frame="Time frame for the leaderboard: 'overall' or 'month' (default: overall)."
+    )
+    async def dkp_leaderboard(self, interaction: discord.Interaction, time_frame: str = "overall"):
+        if interaction.guild.id != GUILD_ID:
+            await interaction.response.send_message("This command is not available in this guild.", ephemeral=True)
+            return
+
+        dkp_data = load_data(dkp_data_file)
+        leaderboard_data = load_data(leaderboard_data_file)
+
+        if time_frame.lower() == "month":
+            current_month = datetime.now().strftime("%Y-%m")
+            monthly_leaderboard = {
+                member_id: months.get(current_month, 0)
+                for member_id, months in leaderboard_data.items()
+            }
+            sorted_leaderboard = sorted(monthly_leaderboard.items(), key=lambda x: x[1], reverse=True)
+            leaderboard_message = "**Monthly DKP Leaderboard:**\n" + "\n".join(
+                [f"<@{member_id}>: {dkp}" for member_id, dkp in sorted_leaderboard]
+            )
+        else:
+            sorted_leaderboard = sorted(dkp_data.items(), key=lambda x: x[1], reverse=True)
+            leaderboard_message = "**Overall DKP Leaderboard:**\n" + "\n".join(
+                [f"<@{member_id}>: {dkp}" for member_id, dkp in sorted_leaderboard]
+            )
+
+        await interaction.response.send_message(leaderboard_message)
+
+@bot.event
 async def on_ready():
-    logger.info('We have logged in as {0.user}'.format(client))
+    logger.info(f"Logged in as {bot.user}!")
+    try:
+        # # Clear cached commands and sync
+        # await bot.tree.clear_commands(guild=discord.Object(id=GUILD_ID))
+        # logger.info("Cleared cached commands.")
 
+        # Load the cog
+        await setup()
 
-@client.event
-async def on_message(message):
-    res = re.search('!(.*) <@!(.*)> (.*)', message.content)
+        # Sync the commands for the specific guild
+        guild = discord.Object(id=GUILD_ID)
+        synced = await bot.tree.sync(guild=guild)
 
-    if message.author == client.user:
-        return
+        logger.info(f"Synced {len(synced)} command(s) with the guild {GUILD_ID}.")
+        logger.info(f"Available commands: {[cmd.name for cmd in synced]}")
+    except Exception as e:
+        logger.error(f"Failed to sync commands: {e}")
 
-    if message.content.startswith('!help'):
-        await message.channel.send('Commands:\n`!plus|minus <nick> <ammount>`')
-        return
+async def setup():
+    await bot.add_cog(DKPManager(bot))
+    logger.info("DKPManager cog has been loaded.")
 
-    if not res:
-        return
-
-    command = res.group(1)
-    user_id = int(res.group(2))
-    ammount = int(res.group(3))
-
-    if command in ('plus', 'minus'):
-        logger.info(f'command: {command}, user: {user_id}, ammount: {ammount}')
-        await operation(command, ammount, user_id)
-
-client.run(DISCORD_TOKEN)
+bot.run(DISCORD_TOKEN)
