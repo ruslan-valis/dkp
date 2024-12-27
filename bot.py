@@ -110,8 +110,7 @@ class DKPManager(commands.Cog):
             await interaction.response.send_message("This command is not available in this guild.", ephemeral=True)
             return
 
-        #if not interaction.user.guild_permissions.manage_guild:
-        if not any(role.name == OFFICER_ROLE for role in interaction.user.roles):
+        if not interaction.user.guild_permissions.manage_guild:
             await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
             return
 
