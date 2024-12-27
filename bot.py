@@ -154,6 +154,10 @@ class DKPManager(commands.Cog):
         if interaction.guild.id != GUILD_ID:
             await interaction.response.send_message("This command is not available in this guild.", ephemeral=True)
             return
+        
+        if not interaction.user.guild_permissions.manage_guild:
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+            return
 
         dkp_data = load_data(dkp_data_file)
         leaderboard_data = load_data(leaderboard_data_file)
