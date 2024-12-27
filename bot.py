@@ -13,6 +13,7 @@ except (TypeError, ValueError):
     raise ValueError("GUILD_ID environment variable is not set or invalid. Please check the .env file.")
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+OFFICER_ROLE = os.getenv("OFFICER_ROLE")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 # Configure logging
@@ -51,6 +52,7 @@ class DKPManager(commands.Cog):
         # Bind commands to the specific guild
         self.bot.tree.add_command(self.dkp_add, guild=discord.Object(id=GUILD_ID))
         self.bot.tree.add_command(self.dkp_remove, guild=discord.Object(id=GUILD_ID))
+        self.bot.tree.add_command(self.dkp_cancel, guild=discord.Object(id=GUILD_ID))
         self.bot.tree.add_command(self.dkp_show, guild=discord.Object(id=GUILD_ID))
         self.bot.tree.add_command(self.dkp_leaderboard, guild=discord.Object(id=GUILD_ID))
 
@@ -64,7 +66,8 @@ class DKPManager(commands.Cog):
             await interaction.response.send_message("This command is not available in this guild.", ephemeral=True)
             return
 
-        if not interaction.user.guild_permissions.manage_guild:
+        #if not interaction.user.guild_permissions.manage_guild:
+        if not any(role.name == OFFICER_ROLE for role in interaction.user.roles):
             await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
             return
 
@@ -107,7 +110,8 @@ class DKPManager(commands.Cog):
             await interaction.response.send_message("This command is not available in this guild.", ephemeral=True)
             return
 
-        if not interaction.user.guild_permissions.manage_guild:
+        #if not interaction.user.guild_permissions.manage_guild:
+        if not any(role.name == OFFICER_ROLE for role in interaction.user.roles):
             await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
             return
 
@@ -122,8 +126,60 @@ class DKPManager(commands.Cog):
         if member_id not in dkp_data:
             dkp_data[member_id] = 0
 
+        if dkp_data[member_id] < amount:
+            await interaction.response.send_message(f"You cant remove more DKP than member have. Current {member.mention} DKP is: {dkp_data[member_id]}", ephemeral=True)
+            return
+
         dkp_data[member_id] = max(0, dkp_data[member_id] - amount)
         save_data(dkp_data_file, dkp_data)
+        logger.info(f"{interaction.user.name} removed {amount} DKP from {member.name}. New DKP: {dkp_data[member_id]}")
+
+        await interaction.response.send_message(f"Removed {amount} DKP from {member.mention}. Current DKP: {dkp_data[member_id]}")
+
+
+    @app_commands.command(name="dkp_cancel", description="Cancel DKP from a guild member, including removing from monthly leaderboard.")
+    @app_commands.describe(
+        member="The member to remove DKP from.",
+        amount="The amount of DKP to remove."
+    )
+    async def dkp_cancel(self, interaction: discord.Interaction, member: discord.Member, amount: int):
+        if interaction.guild.id != GUILD_ID:
+            await interaction.response.send_message("This command is not available in this guild.", ephemeral=True)
+            return
+
+        if not interaction.user.guild_permissions.manage_guild:
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+            return
+
+        if amount < 0:
+            await interaction.response.send_message("Amount must be a non-negative integer.", ephemeral=True)
+            return
+
+        # Load current DKP and leaderboard data
+        dkp_data = load_data(dkp_data_file)
+        leaderboard_data = load_data(leaderboard_data_file)
+
+        member_id = str(member.id)
+        if member_id not in dkp_data:
+            dkp_data[member_id] = 0
+
+        if dkp_data[member_id] < amount:
+            await interaction.response.send_message(f"You cant remove more DKP than member have. Current {member.mention} DKP is: {dkp_data[member_id]}", ephemeral=True)
+            return
+
+        dkp_data[member_id] = max(0, dkp_data[member_id] - amount)
+        save_data(dkp_data_file, dkp_data)
+
+        # Update monthly leaderboard
+        current_month = datetime.now().strftime("%Y-%m")
+        if member_id not in leaderboard_data:
+            leaderboard_data[member_id] = {}
+        if current_month not in leaderboard_data[member_id]:
+            leaderboard_data[member_id][current_month] = 0
+
+        leaderboard_data[member_id][current_month] -= amount
+        save_data(leaderboard_data_file, leaderboard_data)
+        
         logger.info(f"{interaction.user.name} removed {amount} DKP from {member.name}. New DKP: {dkp_data[member_id]}")
 
         await interaction.response.send_message(f"Removed {amount} DKP from {member.mention}. Current DKP: {dkp_data[member_id]}")
@@ -155,7 +211,8 @@ class DKPManager(commands.Cog):
             await interaction.response.send_message("This command is not available in this guild.", ephemeral=True)
             return
         
-        if not interaction.user.guild_permissions.manage_guild:
+        #if not interaction.user.guild_permissions.manage_guild:
+        if not any(role.name == OFFICER_ROLE for role in interaction.user.roles):
             await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
             return
 
