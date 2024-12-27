@@ -5,6 +5,7 @@ import logging
 import os
 import json
 from datetime import datetime
+from dateutil.relativedelta import relativedelta
 
 # Load environment variables
 try:
@@ -203,7 +204,7 @@ class DKPManager(commands.Cog):
 
     @app_commands.command(name="dkp_leaderboard", description="Show the DKP leaderboard.")
     @app_commands.describe(
-        time_frame="Time frame for the leaderboard: 'overall' or 'month' (default: overall)."
+        time_frame="Time frame for the leaderboard: 'overall' or 'current', 'last' (default: overall)."
     )
     async def dkp_leaderboard(self, interaction: discord.Interaction, time_frame: str = "overall"):
         if interaction.guild.id != GUILD_ID:
@@ -218,14 +219,25 @@ class DKPManager(commands.Cog):
         dkp_data = load_data(dkp_data_file)
         leaderboard_data = load_data(leaderboard_data_file)
 
-        if time_frame.lower() == "month":
+        if time_frame.lower() == "current":
             current_month = datetime.now().strftime("%Y-%m")
             monthly_leaderboard = {
                 member_id: months.get(current_month, 0)
                 for member_id, months in leaderboard_data.items()
             }
             sorted_leaderboard = sorted(monthly_leaderboard.items(), key=lambda x: x[1], reverse=True)
-            leaderboard_message = "**Monthly DKP Leaderboard:**\n" + "\n".join(
+            leaderboard_message = "**Current Month DKP Leaderboard:**\n" + "\n".join(
+                [f"<@{member_id}>: {dkp}" for member_id, dkp in sorted_leaderboard]
+            )
+        elif time_frame.lower() == "last":
+            current_date = datetime.now()
+            last_month = (current_date - relativedelta(months=1)).strftime("%Y-%m")
+            monthly_leaderboard = {
+                member_id: months.get(last_month, 0)
+                for member_id, months in leaderboard_data.items()
+            }
+            sorted_leaderboard = sorted(monthly_leaderboard.items(), key=lambda x: x[1], reverse=True)
+            leaderboard_message = "**Last Month DKP Leaderboard:**\n" + "\n".join(
                 [f"<@{member_id}>: {dkp}" for member_id, dkp in sorted_leaderboard]
             )
         else:
