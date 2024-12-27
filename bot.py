@@ -182,7 +182,7 @@ class DKPManager(commands.Cog):
         
         logger.info(f"{interaction.user.name} removed {amount} DKP from {member.name}. New DKP: {dkp_data[member_id]}")
 
-        await interaction.response.send_message(f"Removed {amount} DKP from {member.mention}. Current DKP: {dkp_data[member_id]}")
+        await interaction.response.send_message(f"Canceled {amount} DKP from {member.mention}. Current DKP: {dkp_data[member_id]}")
 
     @app_commands.command(name="dkp_show", description="Show the current DKP of a guild member.")
     @app_commands.describe(
