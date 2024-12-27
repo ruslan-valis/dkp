@@ -1,10 +1,11 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 import logging
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
+import asyncio
 from dateutil.relativedelta import relativedelta
 
 # Load environment variables
@@ -14,8 +15,9 @@ except (TypeError, ValueError):
     raise ValueError("GUILD_ID environment variable is not set or invalid. Please check the .env file.")
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-OFFICER_ROLE = os.getenv("OFFICER_ROLE")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+MEMBER_ROLE = os.getenv("MEMBER_ROLE")
+OFFICER_ROLE = os.getenv("OFFICER_ROLE")
 
 # Configure logging
 logging.basicConfig(level=LOG_LEVEL)
@@ -23,13 +25,15 @@ logger = logging.getLogger(__name__)
 
 # Initialize bot and intents
 intents = discord.Intents.default()
+intents.members = True  # Required to access guild member information
 bot = commands.Bot(command_prefix="!", intents=intents)
 dkp_data_file = "dkp_data.json"
 leaderboard_data_file = "leaderboard_data.json"
+dkp_archive_file = "dkp_archive.json"
 
 # Ensure DKP and leaderboard data files exist
 def ensure_data_files():
-    for file in [dkp_data_file, leaderboard_data_file]:
+    for file in [dkp_data_file, leaderboard_data_file, dkp_archive_file]:
         if not os.path.exists(file):
             with open(file, "w") as f:
                 json.dump({}, f)
@@ -45,6 +49,71 @@ def save_data(file, data):
     with open(file, "w") as f:
         json.dump(data, f, indent=4)
 
+# Function to handle role changes
+async def add_member_to_leaderboards(member: discord.Member):
+    dkp_data = load_data(dkp_data_file)
+    leaderboard_data = load_data(leaderboard_data_file)
+    archive_data = load_data(dkp_archive_file)
+
+    member_id = str(member.id)
+
+    if member_id in archive_data:
+        # Restore DKP from archive
+        dkp_data[member_id] = archive_data.pop(member_id)
+        save_data(dkp_archive_file, archive_data)
+    elif member_id not in dkp_data:
+        dkp_data[member_id] = 0
+
+    current_month = datetime.now().strftime("%Y-%m")
+    if member_id not in leaderboard_data:
+        leaderboard_data[member_id] = {}
+    if current_month not in leaderboard_data[member_id]:
+        leaderboard_data[member_id][current_month] = 0
+
+    save_data(dkp_data_file, dkp_data)
+    save_data(leaderboard_data_file, leaderboard_data)
+
+async def remove_member_from_leaderboards(member: discord.Member):
+    dkp_data = load_data(dkp_data_file)
+    leaderboard_data = load_data(leaderboard_data_file)
+    archive_data = load_data(dkp_archive_file)
+
+    member_id = str(member.id)
+
+    if member_id in dkp_data:
+        archive_data[member_id] = dkp_data.pop(member_id)
+        leaderboard_data.pop(member_id)
+        save_data(dkp_data_file, dkp_data)
+        save_data(leaderboard_data_file, leaderboard_data)
+        save_data(dkp_archive_file, archive_data)
+
+# Events for role updates
+@bot.event
+async def on_member_update(before: discord.Member, after: discord.Member):
+    guild = after.guild
+    role = discord.utils.get(guild.roles, name=MEMBER_ROLE)
+
+    if role in after.roles and role not in before.roles:
+        await add_member_to_leaderboards(after)
+    elif role not in after.roles and role in before.roles:
+        await remove_member_from_leaderboards(after)
+
+# Initialize leaderboard from current members
+async def initialize_leaderboard():
+    guild = bot.get_guild(GUILD_ID)
+    if not guild:
+        logger.error("Guild not found. Ensure the bot is added to the guild and the GUILD_ID is correct.")
+        return
+
+    role = discord.utils.get(guild.roles, name=MEMBER_ROLE)
+    if not role:
+        logger.error(f"Role '{MEMBER_ROLE}' not found in the guild.")
+        return
+
+    for member in guild.members:
+        if role in member.roles:
+            await add_member_to_leaderboards(member)
+
 # DKP management cog
 class DKPManager(commands.Cog):
     def __init__(self, bot):
@@ -56,6 +125,8 @@ class DKPManager(commands.Cog):
         self.bot.tree.add_command(self.dkp_cancel, guild=discord.Object(id=GUILD_ID))
         self.bot.tree.add_command(self.dkp_show, guild=discord.Object(id=GUILD_ID))
         self.bot.tree.add_command(self.dkp_leaderboard, guild=discord.Object(id=GUILD_ID))
+        self.bot.tree.add_command(self.dkp_archive, guild=discord.Object(id=GUILD_ID))
+
 
     @app_commands.command(name="dkp_add", description="Add DKP to a guild member.")
     @app_commands.describe(
@@ -70,6 +141,10 @@ class DKPManager(commands.Cog):
         #if not interaction.user.guild_permissions.manage_guild:
         if not any(role.name == OFFICER_ROLE for role in interaction.user.roles):
             await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+            return
+        
+        if not any(role.name == MEMBER_ROLE for role in member.roles):
+            await interaction.response.send_message("Target is not a Member.", ephemeral=True)
             return
 
         if amount < 0:
@@ -114,6 +189,10 @@ class DKPManager(commands.Cog):
         if not interaction.user.guild_permissions.manage_guild:
             await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
             return
+        
+        if not any(role.name == MEMBER_ROLE for role in member.roles):
+            await interaction.response.send_message("Target is not a Member.", ephemeral=True)
+            return
 
         if amount < 0:
             await interaction.response.send_message("Amount must be a non-negative integer.", ephemeral=True)
@@ -149,6 +228,10 @@ class DKPManager(commands.Cog):
 
         if not interaction.user.guild_permissions.manage_guild:
             await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+            return
+        
+        if not any(role.name == MEMBER_ROLE for role in member.roles):
+            await interaction.response.send_message("Target is not a Member.", ephemeral=True)
             return
 
         if amount < 0:
@@ -202,9 +285,25 @@ class DKPManager(commands.Cog):
 
         await interaction.response.send_message(f"{interaction.user.mention}, {target} current DKP is: {current_dkp}")
 
+    @app_commands.command(name="dkp_archive", description="Show archived DKP data (admin only).")
+    async def dkp_archive(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+            return
+
+        archive_data = load_data(dkp_archive_file)
+        if not archive_data:
+            await interaction.response.send_message("The DKP archive is empty.", ephemeral=True)
+            return
+
+        archive_message = "**DKP Archive:**\n" + "\n".join(
+            [f"<@{member_id}>: {dkp}" for member_id, dkp in archive_data.items()]
+        )
+        await interaction.response.send_message(archive_message)
+
     @app_commands.command(name="dkp_leaderboard", description="Show the DKP leaderboard.")
     @app_commands.describe(
-        time_frame="Time frame for the leaderboard: 'overall' or 'current', 'last' (default: overall)."
+        time_frame="Time frame for the leaderboard: 'overall', 'current', or 'last' (default: overall)."
     )
     async def dkp_leaderboard(self, interaction: discord.Interaction, time_frame: str = "overall"):
         if interaction.guild.id != GUILD_ID:
@@ -228,8 +327,7 @@ class DKPManager(commands.Cog):
             sorted_leaderboard = sorted(monthly_leaderboard.items(), key=lambda x: x[1], reverse=True)
             leaderboard_message = "**Current Month DKP Leaderboard:**\n"
         elif time_frame.lower() == "last":
-            current_date = datetime.now()
-            last_month = (current_date - relativedelta(months=1)).strftime("%Y-%m")
+            last_month = (datetime.now() - relativedelta(months=1)).strftime("%Y-%m")
             monthly_leaderboard = {
                 member_id: months.get(last_month, 0)
                 for member_id, months in leaderboard_data.items()
@@ -255,6 +353,8 @@ async def on_ready():
 
         # Load the cog
         await setup()
+
+        await initialize_leaderboard()
 
         # Sync the commands for the specific guild
         guild = discord.Object(id=GUILD_ID)
