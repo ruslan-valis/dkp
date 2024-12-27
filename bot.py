@@ -226,9 +226,7 @@ class DKPManager(commands.Cog):
                 for member_id, months in leaderboard_data.items()
             }
             sorted_leaderboard = sorted(monthly_leaderboard.items(), key=lambda x: x[1], reverse=True)
-            leaderboard_message = "**Current Month DKP Leaderboard:**\n" + "\n".join(
-                [f"<@{member_id}>: {dkp}" for member_id, dkp in sorted_leaderboard]
-            )
+            leaderboard_message = "**Current Month DKP Leaderboard:**\n"
         elif time_frame.lower() == "last":
             current_date = datetime.now()
             last_month = (current_date - relativedelta(months=1)).strftime("%Y-%m")
@@ -237,14 +235,13 @@ class DKPManager(commands.Cog):
                 for member_id, months in leaderboard_data.items()
             }
             sorted_leaderboard = sorted(monthly_leaderboard.items(), key=lambda x: x[1], reverse=True)
-            leaderboard_message = "**Last Month DKP Leaderboard:**\n" + "\n".join(
-                [f"<@{member_id}>: {dkp}" for member_id, dkp in sorted_leaderboard]
-            )
+            leaderboard_message = "**Last Month DKP Leaderboard:**\n"
         else:
             sorted_leaderboard = sorted(dkp_data.items(), key=lambda x: x[1], reverse=True)
-            leaderboard_message = "**Overall DKP Leaderboard:**\n" + "\n".join(
-                [f"<@{member_id}>: {dkp}" for member_id, dkp in sorted_leaderboard]
-            )
+            leaderboard_message = "**Overall DKP Leaderboard:**\n"
+
+        leaderboard_table = [f"{idx + 1}. <@{member_id}>: {dkp}" for idx, (member_id, dkp) in enumerate(sorted_leaderboard)]
+        leaderboard_message += "\n".join(leaderboard_table)
 
         await interaction.response.send_message(leaderboard_message)
 
