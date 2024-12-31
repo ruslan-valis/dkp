@@ -276,6 +276,10 @@ class DKPManager(commands.Cog):
             await interaction.response.send_message("This command is not available in this guild.", ephemeral=True)
             return
 
+        if not any(role.name == MEMBER_ROLE for role in interaction.user.roles):
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+            return
+
         # Load current DKP data
         dkp_data = load_data(dkp_data_file)
 
