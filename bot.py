@@ -139,7 +139,7 @@ class DKPManager(commands.Cog):
             return
 
         #if not interaction.user.guild_permissions.manage_guild:
-        if not any(role.name == OFFICER_ROLE for role in interaction.user.roles):
+        if not interaction.user.guild_permissions.administrator or not any(role.name == OFFICER_ROLE for role in interaction.user.roles):
             await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
             return
         
@@ -315,7 +315,7 @@ class DKPManager(commands.Cog):
             return
         
         #if not interaction.user.guild_permissions.manage_guild:
-        if not any(role.name == OFFICER_ROLE for role in interaction.user.roles):
+        if not interaction.user.guild_permissions.administrator or not any(role.name == OFFICER_ROLE for role in interaction.user.roles):
             await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
             return
 
