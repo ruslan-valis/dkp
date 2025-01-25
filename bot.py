@@ -14,11 +14,15 @@ try:
 except (TypeError, ValueError):
     raise ValueError("GUILD_ID environment variable is not set or invalid. Please check the .env file.")
 
+try:
+    ALLOWED_DKP_SHOW_CHANNEL_ID = int(os.getenv("ALLOWED_DKP_SHOW_CHANNEL_ID"))
+except (TypeError, ValueError):
+    raise ValueError("ALLOWED_DKP_SHOW_CHANNEL_ID environment variable is not set or invalid. Please check the .env file.")
+
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 MEMBER_ROLE = os.getenv("MEMBER_ROLE")
 OFFICER_ROLE = os.getenv("OFFICER_ROLE")
-ALLOWED_DKP_SHOW_CHANNEL_ID = os.getenv("ALLOWED_DKP_SHOW_CHANNEL_ID")
 
 # Configure logging
 logging.basicConfig(level=LOG_LEVEL)
