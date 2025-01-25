@@ -18,6 +18,7 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 MEMBER_ROLE = os.getenv("MEMBER_ROLE")
 OFFICER_ROLE = os.getenv("OFFICER_ROLE")
+ALLOWED_DKP_SHOW_CHANNEL_ID = os.getenv("ALLOWED_DKP_SHOW_CHANNEL_ID")
 
 # Configure logging
 logging.basicConfig(level=LOG_LEVEL)
@@ -274,6 +275,10 @@ class DKPManager(commands.Cog):
     async def dkp_show(self, interaction: discord.Interaction, member: discord.Member = None):
         if interaction.guild.id != GUILD_ID:
             await interaction.response.send_message("This command is not available in this guild.", ephemeral=True)
+            return
+        
+        if interaction.channel.id != ALLOWED_DKP_SHOW_CHANNEL_ID:
+            await interaction.response.send_message("This command can only be used in a #dkp channel.", ephemeral=True)
             return
 
         if not any(role.name == MEMBER_ROLE for role in interaction.user.roles):
