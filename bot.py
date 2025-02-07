@@ -19,10 +19,17 @@ try:
 except (TypeError, ValueError):
     raise ValueError("ALLOWED_DKP_SHOW_CHANNEL_ID environment variable is not set or invalid. Please check the .env file.")
 
+try:
+    ALLOWED_ALLIANCE_DKP_ADDREMOVE_CHANNEL_ID = int(os.getenv("ALLOWED_ALLIANCE_DKP_ADDREMOVE_CHANNEL_ID"))
+except (TypeError, ValueError):
+    raise ValueError("ALLOWED_ALLIANCE_DKP_ADDREMOVE_CHANNEL_ID environment variable is not set or invalid. Please check the .env file.")
+
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 MEMBER_ROLE = os.getenv("MEMBER_ROLE")
 OFFICER_ROLE = os.getenv("OFFICER_ROLE")
+ALLOWED_CLANS = os.getenv("ALLOWED_CLANS", "").split(",")  # Comma-separated list
+ALLIANCE_LEADER_ROLE = os.getenv("ALLIANCE_LEADER_ROLE")
 
 # Configure logging
 logging.basicConfig(level=LOG_LEVEL)
@@ -35,10 +42,11 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 dkp_data_file = "dkp_data.json"
 leaderboard_data_file = "leaderboard_data.json"
 dkp_archive_file = "dkp_archive.json"
+alliance_dkp_data_file = "alliance_dkp_data.json"
 
 # Ensure DKP and leaderboard data files exist
 def ensure_data_files():
-    for file in [dkp_data_file, leaderboard_data_file, dkp_archive_file]:
+    for file in [dkp_data_file, leaderboard_data_file, dkp_archive_file, alliance_dkp_data_file]:
         if not os.path.exists(file):
             with open(file, "w") as f:
                 json.dump({}, f)
@@ -131,6 +139,9 @@ class DKPManager(commands.Cog):
         self.bot.tree.add_command(self.dkp_show, guild=discord.Object(id=GUILD_ID))
         self.bot.tree.add_command(self.dkp_leaderboard, guild=discord.Object(id=GUILD_ID))
         self.bot.tree.add_command(self.dkp_archive, guild=discord.Object(id=GUILD_ID))
+        self.bot.tree.add_command(self.dkp_alliance_add, guild=discord.Object(id=GUILD_ID))
+        self.bot.tree.add_command(self.dkp_alliance_remove, guild=discord.Object(id=GUILD_ID))
+        self.bot.tree.add_command(self.dkp_alliance_show, guild=discord.Object(id=GUILD_ID))
 
 
     @app_commands.command(name="dkp_add", description="Add DKP to a guild member.")
@@ -355,6 +366,110 @@ class DKPManager(commands.Cog):
         leaderboard_message += "\n".join(leaderboard_table)
 
         await interaction.response.send_message(leaderboard_message)
+
+    @app_commands.command(name="dkp_alliance_add", description="Add DKP to an clan in the alliance.")
+    @app_commands.describe(
+        member="The clan to add DKP to.",
+        amount="The amount of DKP to add."
+    )
+    async def dkp_alliance_add(self, interaction: discord.Interaction, member: str, amount: int):
+        if interaction.guild.id != GUILD_ID:
+            await interaction.response.send_message("This command is not available in this guild.", ephemeral=True)
+            return
+
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+            return
+
+        if interaction.channel.id != ALLOWED_ALLIANCE_DKP_ADDREMOVE_CHANNEL_ID:
+            await interaction.response.send_message("This command can only be used in the allowed channel.", ephemeral=True)
+            return
+
+        if member not in ALLOWED_CLANS:
+            await interaction.response.send_message("Invalid clan selection.", ephemeral=True)
+            return
+
+        if amount < 0:
+            await interaction.response.send_message("Amount must be a non-negative integer.", ephemeral=True)
+            return
+
+        dkp_data = load_data(alliance_dkp_data_file)
+
+        dkp_data[member] = dkp_data.get(member, 0) + amount
+        save_data(alliance_dkp_data_file, dkp_data)
+
+        logger.info(f"{interaction.user.name} added {amount} DKP for {member} clan. New DKP: {dkp_data[member]}")
+
+        await interaction.response.send_message(
+            f"Added {amount} DKP to {member} clan. Current DKP: {dkp_data[member]}")
+
+    @app_commands.command(name="dkp_alliance_remove", description="Remove DKP from a clan in the alliance.")
+    @app_commands.describe(
+        member="Select the clan to remove DKP from.",
+        amount="The amount of DKP to remove."
+    )
+    async def dkp_alliance_remove(self, interaction: discord.Interaction, member: str, amount: int):
+        if interaction.channel.id != ALLOWED_ALLIANCE_DKP_ADDREMOVE_CHANNEL_ID:
+            await interaction.response.send_message("This command can only be used in the allowed channel.", ephemeral=True)
+            return
+
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+            return
+
+        if member not in ALLOWED_CLANS:
+            await interaction.response.send_message("Invalid clan selection.", ephemeral=True)
+            return
+
+        if amount < 0:
+            await interaction.response.send_message("Amount must be a non-negative integer.", ephemeral=True)
+            return
+
+        dkp_data = load_data(alliance_dkp_data_file)
+
+        if member not in dkp_data:
+            dkp_data[member] = 0
+
+        if dkp_data[member] < amount:
+            await interaction.response.send_message(f"You cannot remove more DKP than the clan has. Current DKP: {dkp_data[member]}", ephemeral=True)
+            return
+
+        dkp_data[member] = max(0, dkp_data[member] - amount)
+        save_data(alliance_dkp_data_file, dkp_data)
+
+        logger.info(f"{interaction.user.name} removed {amount} DKP from {member} clan. New DKP: {dkp_data[member]}")
+
+        await interaction.response.send_message(
+            f"Removed {amount} DKP from {member} clan. Current DKP: {dkp_data[member]}")
+
+    @app_commands.command(name="dkp_alliance_show", description="Show the current DKP of a clan in the alliance.")
+    @app_commands.describe(
+        member="The clan whose DKP to view."
+    )
+    async def dkp_alliance_show(self, interaction: discord.Interaction, member: str):
+        if interaction.channel.id != ALLOWED_DKP_SHOW_CHANNEL_ID:
+            await interaction.response.send_message("This command can only be used in the designated DKP channel.",
+                                                    ephemeral=True)
+            return
+
+        if not interaction.user.guild_permissions.administrator and not any(role.name == ALLIANCE_LEADER_ROLE for role in interaction.user.roles):
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+            return
+
+        dkp_data = load_data(alliance_dkp_data_file)
+
+        member = member or "alliance"
+        current_dkp = dkp_data.get(member, 0)
+
+        await interaction.response.send_message(
+            f"{interaction.user.mention}, {member}'s current DKP is: {current_dkp}")
+
+    @dkp_alliance_add.autocomplete("member")
+    @dkp_alliance_remove.autocomplete("member")
+    @dkp_alliance_show.autocomplete("member")
+    async def member_autocomplete(self, interaction: discord.Interaction, current: str):
+        return [app_commands.Choice(name=clan, value=clan) for clan in ALLOWED_CLANS if current.lower() in clan.lower()]
+
 
 @bot.event
 async def on_ready():
