@@ -24,6 +24,11 @@ try:
 except (TypeError, ValueError):
     raise ValueError("ALLOWED_ALLIANCE_DKP_ADDREMOVE_CHANNEL_ID environment variable is not set or invalid. Please check the .env file.")
 
+try:
+    ALLOWED_ALLIANCE_DKP_SHOW_CHANNEL_ID = int(os.getenv("ALLOWED_ALLIANCE_DKP_SHOW_CHANNEL_ID"))
+except (TypeError, ValueError):
+    raise ValueError("ALLOWED_ALLIANCE_DKP_SHOW_CHANNEL_ID environment variable is not set or invalid. Please check the .env file.")
+
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 MEMBER_ROLE = os.getenv("MEMBER_ROLE")
@@ -447,7 +452,7 @@ class DKPManager(commands.Cog):
         member="The clan whose DKP to view."
     )
     async def dkp_alliance_show(self, interaction: discord.Interaction, member: str):
-        if interaction.channel.id != ALLOWED_DKP_SHOW_CHANNEL_ID:
+        if interaction.channel.id != ALLOWED_ALLIANCE_DKP_SHOW_CHANNEL_ID:
             await interaction.response.send_message("This command can only be used in the designated DKP channel.",
                                                     ephemeral=True)
             return
