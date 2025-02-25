@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands, tasks
+from discord.ui import View, Select, Button, TextInput, Modal
 from discord import app_commands
 import logging
 import os
@@ -28,6 +29,11 @@ try:
     ALLOWED_ALLIANCE_DKP_SHOW_CHANNEL_ID = int(os.getenv("ALLOWED_ALLIANCE_DKP_SHOW_CHANNEL_ID"))
 except (TypeError, ValueError):
     raise ValueError("ALLOWED_ALLIANCE_DKP_SHOW_CHANNEL_ID environment variable is not set or invalid. Please check the .env file.")
+
+try:
+    TRANSFER_CHANNEL_ID = int(os.getenv("TRANSFER_CHANNEL_ID"))
+except (TypeError, ValueError):
+    raise ValueError("TRANSFER_CHANNEL_ID environment variable is not set or invalid. Please check the .env file.")
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -386,7 +392,10 @@ class DKPManager(commands.Cog):
             await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
             return
 
-        if interaction.channel.id != ALLOWED_ALLIANCE_DKP_ADDREMOVE_CHANNEL_ID:
+        if interaction.channel.id != ALLOWED_ALLIANCE_DKP_ADDREMOVE_CHANNEL_ID and (
+                not isinstance(interaction.channel,
+                               discord.Thread) or interaction.channel.parent_id != ALLOWED_ALLIANCE_DKP_ADDREMOVE_CHANNEL_ID
+        ):
             await interaction.response.send_message("This command can only be used in the allowed channel.", ephemeral=True)
             return
 
@@ -414,7 +423,10 @@ class DKPManager(commands.Cog):
         amount="The amount of DKP to remove."
     )
     async def dkp_alliance_remove(self, interaction: discord.Interaction, member: str, amount: int):
-        if interaction.channel.id != ALLOWED_ALLIANCE_DKP_ADDREMOVE_CHANNEL_ID:
+        if interaction.channel.id != ALLOWED_ALLIANCE_DKP_ADDREMOVE_CHANNEL_ID and (
+                not isinstance(interaction.channel,
+                               discord.Thread) or interaction.channel.parent_id != ALLOWED_ALLIANCE_DKP_ADDREMOVE_CHANNEL_ID
+        ):
             await interaction.response.send_message("This command can only be used in the allowed channel.", ephemeral=True)
             return
 
@@ -475,6 +487,42 @@ class DKPManager(commands.Cog):
     async def member_autocomplete(self, interaction: discord.Interaction, current: str):
         return [app_commands.Choice(name=clan, value=clan) for clan in ALLOWED_CLANS if current.lower() in clan.lower()]
 
+class NumberModal(Modal, title="Передача DKP"):
+    def __init__(self, member_id, member_name):
+        super().__init__()
+        self.member_id = member_id
+        self.member_name = member_name
+
+        # Load current DKP data
+        dkp_data = load_data(dkp_data_file)
+        current_dkp = dkp_data.get(member_id, 0)
+
+        self.add_item(TextInput(label=f"Ви обрали: {self.member_name}.", style=discord.TextStyle.short, required=False, default=f"Ви маєте {current_dkp} DKP."))
+        self.number_input = TextInput(label="Введіть кількість DKP, які ви хочете передати", style=discord.TextStyle.short, required=True)
+        self.add_item(self.number_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not self.number_input.value.isdigit():
+            await interaction.response.send_message("Будь ласка, введіть корректне число.", ephemeral=True)
+            return
+        await interaction.response.send_message(f"Confirmed for <@{self.member_id}> with number {self.number_input.value}", ephemeral=False)
+
+class MemberSelectionView(View):
+    def __init__(self, members):
+        super().__init__()
+        self.members = members
+        self.add_item(self.create_select())
+
+    def create_select(self):
+        options = [discord.SelectOption(label=member.display_name, value=str(member.id)) for member in self.members]
+        select = Select(placeholder="Select a member", options=options)
+        select.callback = self.select_callback
+        return select
+
+    async def select_callback(self, interaction: discord.Interaction):
+        selected_member_id = interaction.data["values"][0]
+        selected_member_name = next((m.display_name for m in self.members if str(m.id) == selected_member_id), "Unknown")
+        await interaction.response.send_modal(NumberModal(selected_member_id, selected_member_name))
 
 @bot.event
 async def on_ready():
@@ -495,6 +543,14 @@ async def on_ready():
 
         logger.info(f"Synced {len(synced)} command(s) with the guild {GUILD_ID}.")
         logger.info(f"Available commands: {[cmd.name for cmd in synced]}")
+
+        # Dialog to transfer DKP
+        transfer_channel = await bot.fetch_channel(TRANSFER_CHANNEL_ID)
+        members_guild = transfer_channel.guild
+        member_role = discord.utils.get(members_guild.roles, name=MEMBER_ROLE)
+        members = [m for m in members_guild.members if member_role in m.roles]
+        view = MemberSelectionView(members)
+        await transfer_channel.send("Тут ви можете передати свої DKP іншій людині. \nВиберіть члена клану, кому ви б хотіли передати свої ДКП. ", view=view)
     except Exception as e:
         logger.error(f"Failed to sync commands: {e}")
 
