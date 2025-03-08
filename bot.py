@@ -40,6 +40,7 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 MEMBER_ROLE = os.getenv("MEMBER_ROLE")
 OFFICER_ROLE = os.getenv("OFFICER_ROLE")
 ALLOWED_CLANS = os.getenv("ALLOWED_CLANS", "").split(",")  # Comma-separated list
+ALLOWED_EVENTS_LIST = os.getenv("ALLOWED_EVENTS_LIST", "").split(",")  # Comma-separated list
 ALLIANCE_LEADER_ROLE = os.getenv("ALLIANCE_LEADER_ROLE")
 
 # Configure logging
@@ -380,10 +381,11 @@ class DKPManager(commands.Cog):
 
     @app_commands.command(name="dkp_alliance_add", description="Add DKP to an clan in the alliance.")
     @app_commands.describe(
+        event_type="The event type to add DKP to.",
         member="The clan to add DKP to.",
         amount="The amount of DKP to add."
     )
-    async def dkp_alliance_add(self, interaction: discord.Interaction, member: str, amount: int):
+    async def dkp_alliance_add(self, interaction: discord.Interaction, event_type: str, member: str, amount: int):
         if interaction.guild.id != GUILD_ID:
             await interaction.response.send_message("This command is not available in this guild.", ephemeral=True)
             return
@@ -399,39 +401,8 @@ class DKPManager(commands.Cog):
             await interaction.response.send_message("This command can only be used in the allowed channel.", ephemeral=True)
             return
 
-        if member not in ALLOWED_CLANS:
-            await interaction.response.send_message("Invalid clan selection.", ephemeral=True)
-            return
-
-        if amount < 0:
-            await interaction.response.send_message("Amount must be a non-negative integer.", ephemeral=True)
-            return
-
-        dkp_data = load_data(alliance_dkp_data_file)
-
-        dkp_data[member] = dkp_data.get(member, 0) + amount
-        save_data(alliance_dkp_data_file, dkp_data)
-
-        logger.info(f"{interaction.user.name} added {amount} DKP for {member} clan. New DKP: {dkp_data[member]}")
-
-        await interaction.response.send_message(
-            f"Added {amount} DKP to {member} clan. Current DKP: {dkp_data[member]}")
-
-    @app_commands.command(name="dkp_alliance_remove", description="Remove DKP from a clan in the alliance.")
-    @app_commands.describe(
-        member="Select the clan to remove DKP from.",
-        amount="The amount of DKP to remove."
-    )
-    async def dkp_alliance_remove(self, interaction: discord.Interaction, member: str, amount: int):
-        if interaction.channel.id != ALLOWED_ALLIANCE_DKP_ADDREMOVE_CHANNEL_ID and (
-                not isinstance(interaction.channel,
-                               discord.Thread) or interaction.channel.parent_id != ALLOWED_ALLIANCE_DKP_ADDREMOVE_CHANNEL_ID
-        ):
-            await interaction.response.send_message("This command can only be used in the allowed channel.", ephemeral=True)
-            return
-
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        if event_type not in ALLOWED_EVENTS_LIST:
+            await interaction.response.send_message("Invalid event type selection.", ephemeral=True)
             return
 
         if member not in ALLOWED_CLANS:
@@ -445,25 +416,74 @@ class DKPManager(commands.Cog):
         dkp_data = load_data(alliance_dkp_data_file)
 
         if member not in dkp_data:
-            dkp_data[member] = 0
+            dkp_data[member] = {}
+        if event_type not in dkp_data[member]:
+            dkp_data[member][event_type] = 0
 
-        if dkp_data[member] < amount:
-            await interaction.response.send_message(f"You cannot remove more DKP than the clan has. Current DKP: {dkp_data[member]}", ephemeral=True)
-            return
+        dkp_data[member][event_type] += amount
 
-        dkp_data[member] = max(0, dkp_data[member] - amount)
         save_data(alliance_dkp_data_file, dkp_data)
 
-        logger.info(f"{interaction.user.name} removed {amount} DKP from {member} clan. New DKP: {dkp_data[member]}")
+        logger.info(f"{interaction.user.name} added {amount} DKP for {member} clan. New DKP {event_type}: {dkp_data[member][event_type]}")
 
         await interaction.response.send_message(
-            f"Removed {amount} DKP from {member} clan. Current DKP: {dkp_data[member]}")
+            f"Added {amount} DKP to {member} clan. Current DKP for event {event_type}: {dkp_data[member][event_type]}")
+
+    @app_commands.command(name="dkp_alliance_remove", description="Remove DKP from a clan in the alliance.")
+    @app_commands.describe(
+        event_type="The event type to remove DKP from.",
+        member="Select the clan to remove DKP from.",
+        amount="The amount of DKP to remove."
+    )
+    async def dkp_alliance_remove(self, interaction: discord.Interaction, event_type: str, member: str, amount: int):
+        if interaction.channel.id != ALLOWED_ALLIANCE_DKP_ADDREMOVE_CHANNEL_ID and (
+                not isinstance(interaction.channel,
+                               discord.Thread) or interaction.channel.parent_id != ALLOWED_ALLIANCE_DKP_ADDREMOVE_CHANNEL_ID
+        ):
+            await interaction.response.send_message("This command can only be used in the allowed channel.", ephemeral=True)
+            return
+
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+            return
+
+        if event_type not in ALLOWED_EVENTS_LIST:
+            await interaction.response.send_message("Invalid event type selection.", ephemeral=True)
+            return
+
+        if member not in ALLOWED_CLANS:
+            await interaction.response.send_message("Invalid clan selection.", ephemeral=True)
+            return
+
+        if amount < 0:
+            await interaction.response.send_message("Amount must be a non-negative integer.", ephemeral=True)
+            return
+
+        dkp_data = load_data(alliance_dkp_data_file)
+
+        if member not in dkp_data:
+            dkp_data[member] = {}
+        if event_type not in dkp_data[member]:
+            dkp_data[member][event_type] = 0
+
+        if dkp_data[member][event_type] < amount:
+            await interaction.response.send_message(f"You cannot remove more DKP than the clan has. Current DKP for event {event_type}: {dkp_data[member][event_type]}", ephemeral=True)
+            return
+
+        dkp_data[member][event_type] = max(0, dkp_data[member][event_type] - amount)
+        save_data(alliance_dkp_data_file, dkp_data)
+
+        logger.info(f"{interaction.user.name} removed {amount} DKP from {member} clan. New DKP for event {event_type}: {dkp_data[member][event_type]}")
+
+        await interaction.response.send_message(
+            f"Removed {amount} DKP from {member} clan. Current DKP for event {event_type}: {dkp_data[member][event_type]}")
 
     @app_commands.command(name="dkp_alliance_show", description="Show the current DKP of a clan in the alliance.")
     @app_commands.describe(
+        event_type="The event type to show DKP for.",
         member="The clan whose DKP to view."
     )
-    async def dkp_alliance_show(self, interaction: discord.Interaction, member: str):
+    async def dkp_alliance_show(self, interaction: discord.Interaction, event_type: str, member: str):
         if interaction.channel.id != ALLOWED_ALLIANCE_DKP_SHOW_CHANNEL_ID:
             await interaction.response.send_message("This command can only be used in the designated DKP channel.",
                                                     ephemeral=True)
@@ -473,19 +493,34 @@ class DKPManager(commands.Cog):
             await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
             return
 
+        if event_type not in ALLOWED_EVENTS_LIST:
+            await interaction.response.send_message("Invalid event type selection.", ephemeral=True)
+            return
+
+        if member not in ALLOWED_CLANS:
+            await interaction.response.send_message("Invalid clan selection.", ephemeral=True)
+            return
+
         dkp_data = load_data(alliance_dkp_data_file)
 
         member = member or "alliance"
-        current_dkp = dkp_data.get(member, 0)
+        current_member = dkp_data.get(member, {})
+        current_dkp = current_member.get(event_type, 0)
 
         await interaction.response.send_message(
-            f"{interaction.user.mention}, {member}'s current DKP is: {current_dkp}")
+            f"{interaction.user.mention}, {member}'s current DKP for event {event_type} is: {current_dkp}")
 
     @dkp_alliance_add.autocomplete("member")
     @dkp_alliance_remove.autocomplete("member")
     @dkp_alliance_show.autocomplete("member")
     async def member_autocomplete(self, interaction: discord.Interaction, current: str):
         return [app_commands.Choice(name=clan, value=clan) for clan in ALLOWED_CLANS if current.lower() in clan.lower()]
+
+    @dkp_alliance_add.autocomplete("event_type")
+    @dkp_alliance_remove.autocomplete("event_type")
+    @dkp_alliance_show.autocomplete("event_type")
+    async def member_autocomplete(self, interaction: discord.Interaction, current: str):
+        return [app_commands.Choice(name=event_name, value=event_name) for event_name in ALLOWED_EVENTS_LIST if current.lower() in event_name.lower()]
 
 class NumberModal(Modal, title="Передача DKP"):
     def __init__(self, member_id, member_name):
