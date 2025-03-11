@@ -436,13 +436,6 @@ class DKPManager(commands.Cog):
         amount="The amount of DKP to remove."
     )
     async def dkp_alliance_remove(self, interaction: discord.Interaction, event_type: str, member: str, amount: int):
-        if interaction.channel.id != ALLOWED_ALLIANCE_DKP_ADDREMOVE_CHANNEL_ID and (
-                not isinstance(interaction.channel,
-                               discord.Thread) or interaction.channel.parent_id != ALLOWED_ALLIANCE_DKP_ADDREMOVE_CHANNEL_ID
-        ):
-            await interaction.response.send_message("This command can only be used in the allowed channel.", ephemeral=True)
-            return
-
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
             return
