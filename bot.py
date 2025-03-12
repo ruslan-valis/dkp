@@ -149,6 +149,7 @@ class DKPManager(commands.Cog):
         self.bot.tree.add_command(self.dkp_remove, guild=discord.Object(id=GUILD_ID))
         self.bot.tree.add_command(self.dkp_cancel, guild=discord.Object(id=GUILD_ID))
         self.bot.tree.add_command(self.dkp_show, guild=discord.Object(id=GUILD_ID))
+        self.bot.tree.add_command(self.dkp_trade, guild=discord.Object(id=GUILD_ID))
         self.bot.tree.add_command(self.dkp_leaderboard, guild=discord.Object(id=GUILD_ID))
         self.bot.tree.add_command(self.dkp_archive, guild=discord.Object(id=GUILD_ID))
         self.bot.tree.add_command(self.dkp_alliance_add, guild=discord.Object(id=GUILD_ID))
@@ -529,6 +530,53 @@ class DKPManager(commands.Cog):
 
         await interaction.followup.send(
             f"{interaction.user.mention}, {member}'s current DKP for event {event_type} is: {current_dkp}")
+
+    @app_commands.command(name="dkp_trade", description="Trade my DKP to a guild member.")
+    @app_commands.describe(
+        member="The member to trade DKP to.",
+        amount="The amount of DKP to trade."
+    )
+    async def dkp_trade(self, interaction: discord.Interaction, member: discord.Member, amount: int):
+        # Use defer to avoid timeout issues
+        await interaction.response.defer()
+
+        if interaction.guild.id != GUILD_ID:
+            await interaction.followup.send("This command is not available in this guild.", ephemeral=True)
+            return
+
+        if not any(role.name == MEMBER_ROLE for role in member.roles):
+            await interaction.followup.send("Ціль передачі не є членом клану", ephemeral=True)
+            return
+
+        if amount <= 0:
+            await interaction.followup.send("Кількість не може бути менше або дорівнвати нулю", ephemeral=True)
+            return
+
+        if member.id == interaction.user.id:
+            await interaction.followup.send("Ви не можете передати поінти самому собі.", ephemeral=True)
+            return
+
+
+        # Load current DKP and leaderboard data
+        dkp_data = load_data(dkp_data_file)
+
+        sender_id = str(interaction.user.id)
+        receiver_id = str(member.id)
+        if receiver_id not in dkp_data:
+            dkp_data[receiver_id] = 0
+
+        if amount > dkp_data[sender_id]:
+            await interaction.followup.send(f"Недостатньо DKP, маєш: {dkp_data[sender_id]}", ephemeral=True)
+            return
+
+        dkp_data[sender_id] -= amount
+        dkp_data[receiver_id] = dkp_data.get(receiver_id, 0) + amount
+        save_data(dkp_data_file, dkp_data)
+
+        logger.info(f"{interaction.user.name} traded {amount} DKP to {member.name}.")
+
+        await interaction.followup.send(
+            f"{interaction.user.mention} передав {amount} DKP до {member.mention}.")
 
     @dkp_alliance_add.autocomplete("member")
     @dkp_alliance_remove.autocomplete("member")
