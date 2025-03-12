@@ -56,20 +56,6 @@ leaderboard_data_file = "leaderboard_data.json"
 dkp_archive_file = "dkp_archive.json"
 alliance_dkp_data_file = "alliance_dkp_data.json"
 
-# Trade DKP
-TRADE_PINNED_MESSAGE_FILE = "trade_message.json"
-
-def save_trade_pinned_message_id(trade_message_id):
-    with open(TRADE_PINNED_MESSAGE_FILE, "w") as f:
-        json.dump({"trade_pinned_message_id": trade_message_id}, f)
-
-def load_trade_pinned_message_id():
-    if os.path.exists(TRADE_PINNED_MESSAGE_FILE):
-        with open(TRADE_PINNED_MESSAGE_FILE, "r") as f:
-            data = json.load(f)
-            return data.get("trade_pinned_message_id")
-    return None
-
 # Ensure DKP and leaderboard data files exist
 def ensure_data_files():
     for file in [dkp_data_file, leaderboard_data_file, dkp_archive_file, alliance_dkp_data_file]:
@@ -556,81 +542,6 @@ class DKPManager(commands.Cog):
     async def member_autocomplete(self, interaction: discord.Interaction, current: str):
         return [app_commands.Choice(name=event_name, value=event_name) for event_name in ALLOWED_EVENTS_LIST if current.lower() in event_name.lower()]
 
-
-class DKPDropdown(discord.ui.Select):
-    def __init__(self, members):
-        options = [discord.SelectOption(label=member.display_name, value=str(member.id)) for member in members]
-        super().__init__(placeholder="Виберіть члена клану", options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        user_id = interaction.user.id
-        target_id = int(self.values[0])
-        await interaction.response.send_modal(DKPTransferModal(user_id, target_id))
-
-
-class DKPTransferModal(discord.ui.Modal, title="Передача DKP"):
-    def __init__(self, sender_id, receiver_id):
-        super().__init__()
-        self.sender_id = sender_id
-        self.receiver_id = receiver_id
-        self.dkp_amount = discord.ui.TextInput(label="Введіть кількість DKP", style=discord.TextStyle.short)
-        self.add_item(self.dkp_amount)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        dkp_data = load_data(dkp_data_file)
-        sender_id = str(self.sender_id)
-        receiver_id = str(self.receiver_id)
-
-        sender_balance = dkp_data.get(sender_id, 0)
-        transfer_amount = int(self.dkp_amount.value)
-
-        # Use defer to avoid timeout issues
-        await interaction.response.defer()
-
-        # Ensure receiver_id is set
-        if self.sender_id is None:
-            await interaction.followup.send("Помилка: Не вдалося знайти відправника.", ephemeral=True)
-            return
-
-        # Ensure receiver_id is set
-        if self.receiver_id is None:
-            await interaction.followup.send("Помилка: Не вдалося знайти отримувача.", ephemeral=True)
-            return
-
-        if self.sender_id == self.receiver_id:
-            await interaction.followup.send("Ви не можете відправиди DKP самі собі!", ephemeral=True)
-            return
-
-        if transfer_amount <= 0:
-            await interaction.followup.send(f"Ви не можете відправити відємне значення або нуль.", ephemeral=True)
-            return
-
-        if transfer_amount > sender_balance:
-            await interaction.followup.send(f"Недостатньо DKP! Ви маєте: {sender_balance}", ephemeral=True)
-            return
-
-        dkp_data[sender_id] -= transfer_amount
-        dkp_data[receiver_id] = dkp_data.get(receiver_id, 0) + transfer_amount
-        save_data(dkp_data_file, dkp_data)
-
-        sender = interaction.guild.get_member(self.sender_id)
-        receiver = interaction.guild.get_member(self.receiver_id)
-        await interaction.followup.send(
-            f"{sender.mention} передав {transfer_amount} DKP користувачу {receiver.mention}!",
-            allowed_mentions=discord.AllowedMentions(users=True))
-
-
-class DKPView(discord.ui.View):
-    def __init__(self, members):
-        super().__init__(timeout=None)
-        self.add_item(DKPDropdown(members))
-        self.add_item(discord.ui.Button(label="Передати", style=discord.ButtonStyle.green, custom_id="transfer_button"))
-
-@bot.event
-async def on_interaction(interaction: discord.Interaction):
-    if interaction.data and interaction.data.get("custom_id") == "transfer_button":
-        await interaction.response.send_modal(DKPTransferModal(interaction.user.id, None))
-
 @bot.event
 async def on_ready():
     logger.info(f"Logged in as {bot.user}!")
@@ -650,30 +561,6 @@ async def on_ready():
 
         logger.info(f"Synced {len(synced)} command(s) with the guild {GUILD_ID}.")
         logger.info(f"Available commands: {[cmd.name for cmd in synced]}")
-
-        # Trade DKP
-        print(f'Logged in as {bot.user}')
-        channel = bot.get_channel(TRANSFER_CHANNEL_ID)
-
-        if not channel:
-            print("Invalid channel ID")
-            return
-
-        pinned_message_id = load_trade_pinned_message_id()
-
-        members = [member for member in channel.guild.members if
-                   any(role.name == MEMBER_ROLE for role in member.roles)]
-        view = DKPView(members)
-        message_content = "Тут ви можете передати свої DKP іншій людині.\nВиберіть члена клану, кому ви б хотіли передати свої ДКП."
-
-        if pinned_message_id:
-            msg = await channel.fetch_message(pinned_message_id)
-            await msg.edit(content=message_content, view=view)
-        else:
-            msg = await channel.send(content=message_content, view=view)
-            await msg.pin()
-            pinned_message_id = msg.id
-            save_trade_pinned_message_id(pinned_message_id)
     except Exception as e:
         logger.error(f"Failed to sync commands: {e}")
 
