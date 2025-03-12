@@ -652,7 +652,6 @@ async def on_ready():
         logger.info(f"Available commands: {[cmd.name for cmd in synced]}")
 
         # Trade DKP
-        global pinned_message_id
         print(f'Logged in as {bot.user}')
         channel = bot.get_channel(TRANSFER_CHANNEL_ID)
 
